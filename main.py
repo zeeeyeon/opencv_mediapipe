@@ -31,42 +31,49 @@ def detect_wingspan(image: np.ndarray, height: float):
     left_ankle = landmarks[mp_pose.PoseLandmark.LEFT_ANKLE]
     right_ankle = landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE]
 
+    # 손끝 키 포인트 확인
     if not all([left_fingertip.visibility > 0.5, right_fingertip.visibility > 0.5]):
         return {"error": "손끝 키포인트가 감지되지 않았습니다. 팔을 완전히 벌려주세요."}
 
+    # 신체 키 포인트 감지
     if not all([head.visibility > 0.5, left_ankle.visibility > 0.5, right_ankle.visibility > 0.5]):
         return {"error": "신체 키포인트 감지가 충분하지 않습니다. 카메라 각도를 조정하세요."}
 
     img_h, img_w, _ = image.shape
-    left_hand_x = left_fingertip.x * img_w
-    left_hand_y = left_fingertip.y * img_h
-    right_hand_x = right_fingertip.x * img_w
-    right_hand_y = right_fingertip.y * img_h
-    head_x = head.x * img_w
-    head_y = head.y * img_h
-    left_ankle_x = left_ankle.x * img_w
-    left_ankle_y = left_ankle.y * img_h
-    right_ankle_x = right_ankle.x * img_w
-    right_ankle_y = right_ankle.y * img_h
+    left_hand_x, left_hand_y = left_fingertip.x * img_w, left_fingertip.y * img_h
+    right_hand_x, right_hand_y = right_fingertip.x * img_w, right_fingertip.y * img_h
+    head_x, head_y = head.x * img_w, head.y * img_h
+    left_ankle_x, left_ankle_y = left_ankle.x * img_w, left_ankle.y * img_h
+    right_ankle_x, right_ankle_y = right_ankle.x * img_w, right_ankle.y * img_h
 
+    # 픽셀 단위로 윙스팬 및 키 측정
     pixel_wingspan = np.linalg.norm([left_hand_x - right_hand_x, left_hand_y - right_hand_y])
     pixel_height = np.linalg.norm([head_x - (left_ankle_x + right_ankle_x) / 2, head_y - (left_ankle_y + right_ankle_y) / 2])
     real_wingspan = (pixel_wingspan / pixel_height) * height
 
+    # 오류 체크: 비정상적으로 큰/작은 값 필터링
     if real_wingspan < height * 0.9 or real_wingspan > height * 1.15:
         return {"error": f"윙스팬 계산 오류. 포즈나 카메라 각도를 조정하세요. (계산된 값: {real_wingspan:.2f}cm)"}
 
-    return {
-        "wingspan": round(real_wingspan, 2),
-    }
+    return round(real_wingspan, 2)
 
-@app.post("/api/user/wingspan")
+@app.post("/fastapi/user/wingspan")
 async def calculate_wingspan(file: UploadFile = File(...), height: float = Form(...)):
     image = np.frombuffer(await file.read(), np.uint8)
     image = cv2.imdecode(image, cv2.IMREAD_COLOR)
-    result = detect_wingspan(image, height)
+    wingspan = detect_wingspan(image, height)
 
-    if "error" in result:
-        return JSONResponse(content=result, status_code=400)
+    if isinstance(wingspan, dict) and "error" in wingspan:
+        return JSONResponse(content=wingspan, status_code=400)
 
-    return result
+    response_data = {
+        "status": {
+            "code": 200,
+            "message": "사용자의 팔 길이가 측정되었습니다."
+        },
+        "content": {
+            "armSpan": wingspan,
+        }
+    }
+
+    return JSONResponse(content=response_data)
